@@ -50,8 +50,9 @@ npm ci
 npm test
 ```
 
-`dist/index.js` is the bundled function. The release pull request rebuilds it,
-so a pull request does not need to.
+`dist/index.js` is the bundled function and `dist/renderer.zip` the archive
+Lambda runs. The release pull request rebuilds both, so a pull request does not
+need to.
 
 ## License
 

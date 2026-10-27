@@ -71,7 +71,7 @@ jobs:
             const { data: head } = await github.rest.git.getRef({ owner, repo, ref });
             const { data: parent } = await github.rest.git.getCommit({ owner, repo, commit_sha: head.object.sha });
             const tree = [];
-            for (const path of ["dist/index.js", "dist/index.js.LEGAL.txt"]) {
+            for (const path of ["dist/index.js", "dist/index.js.LEGAL.txt", "dist/renderer.zip"]) {
               const { data: blob } = await github.rest.git.createBlob({
                 owner,
                 repo,
