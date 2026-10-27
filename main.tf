@@ -1,9 +1,3 @@
-data "archive_file" "renderer" {
-  type        = "zip"
-  source_file = "${path.module}/dist/index.js"
-  output_path = "${path.module}/dist/renderer.zip"
-}
-
 resource "aws_lambda_function" "this" {
   function_name    = var.name
   description      = "Renders charts for MediaWiki's Chart extension"
@@ -11,8 +5,8 @@ resource "aws_lambda_function" "this" {
   runtime          = "nodejs22.x"
   architectures    = ["arm64"]
   handler          = "index.handler"
-  filename         = data.archive_file.renderer.output_path
-  source_code_hash = data.archive_file.renderer.output_base64sha256
+  filename         = "${path.module}/dist/renderer.zip"
+  source_code_hash = filebase64sha256("${path.module}/dist/renderer.zip")
   memory_size      = var.memory_size
   timeout          = var.timeout
 

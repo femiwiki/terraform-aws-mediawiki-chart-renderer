@@ -1,4 +1,3 @@
 /node_modules
-/dist/renderer.zip
 .terraform/
 .terraform.lock.hcl
