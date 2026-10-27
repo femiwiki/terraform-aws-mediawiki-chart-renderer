@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/femiwiki/terraform-aws-mediawiki-chart-renderer/compare/v0.1.0...v0.1.1) (2026-10-27)
+
+
+### Bug Fixes
+
+* ship the function archive instead of zipping it during plan ([#14](https://github.com/femiwiki/terraform-aws-mediawiki-chart-renderer/issues/14)) ([3d9656e](https://github.com/femiwiki/terraform-aws-mediawiki-chart-renderer/commit/3d9656e44c6cf1192433db189e9e693154c58282))
+
 ## 0.1.0 (2026-10-27)
 
 
