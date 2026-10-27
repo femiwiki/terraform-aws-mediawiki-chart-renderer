@@ -22,3 +22,7 @@ updates:
       - 'femiwiki/reviewer'
     cooldown:
       default-days: 7
+    commit-message:
+      prefix: 'fix'
+      prefix-development: 'chore'
+      include: 'scope'
