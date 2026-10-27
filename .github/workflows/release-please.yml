@@ -1,0 +1,91 @@
+---
+# Opened with the Femiwiki PAT app's token rather than GITHUB_TOKEN, so the
+# release pull request runs its required checks like any other.
+name: Release Please
+on:
+  push:
+    branches:
+      - main
+permissions: {}
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      pr: ${{ steps.release.outputs.pr }}
+    steps:
+      - uses: peter-murray/workflow-application-token-action@dad2b81e50ce3edeb5f3b7ffbd79f731368bd668  # v5.1.1
+        id: app-token
+        with:
+          application_id: ${{ vars.PAT_APPLICATION_ID }}
+          application_private_key: ${{ secrets.PAT_APPLICATION_PRIVATE_KEY }}
+
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7  # v5.0.0
+        id: release
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+  # A release's tag is what the registries serve, so the release pull request
+  # carries the function built from what it releases
+  dist:
+    needs: release-please
+    if: needs.release-please.outputs.pr
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: 22
+
+      - run: npm ci --ignore-scripts
+
+      - run: npm run build
+
+      - uses: peter-murray/workflow-application-token-action@dad2b81e50ce3edeb5f3b7ffbd79f731368bd668  # v5.1.1
+        id: app-token
+        with:
+          application_id: ${{ vars.PAT_APPLICATION_ID }}
+          application_private_key: ${{ secrets.PAT_APPLICATION_PRIVATE_KEY }}
+
+      - name: Commit dist to the release pull request
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        env:
+          BRANCH: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const fs = require("node:fs");
+            const { owner, repo } = context.repo;
+            const ref = `heads/${process.env.BRANCH}`;
+            const { data: head } = await github.rest.git.getRef({ owner, repo, ref });
+            const { data: parent } = await github.rest.git.getCommit({ owner, repo, commit_sha: head.object.sha });
+            const tree = [];
+            for (const path of ["dist/index.js", "dist/index.js.LEGAL.txt"]) {
+              const { data: blob } = await github.rest.git.createBlob({
+                owner,
+                repo,
+                content: fs.readFileSync(path).toString("base64"),
+                encoding: "base64",
+              });
+              tree.push({ path, mode: "100644", type: "blob", sha: blob.sha });
+            }
+            const { data: built } = await github.rest.git.createTree({ owner, repo, base_tree: parent.tree.sha, tree });
+            if (built.sha === parent.tree.sha) {
+              core.info("dist is already up to date");
+              return;
+            }
+            const { data: commit } = await github.rest.git.createCommit({
+              owner,
+              repo,
+              message: "chore: rebuild dist",
+              tree: built.sha,
+              parents: [parent.sha],
+            });
+            await github.rest.git.updateRef({ owner, repo, ref, sha: commit.sha });
