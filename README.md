@@ -8,6 +8,16 @@ or by sending each chart to a chart service at `$wgChartServiceUrl`. This module
 runs that service on Lambda, so the wiki host needs neither Node.js nor the
 memory a render takes.
 
+## Development
+
+```sh
+npm ci
+npm test
+```
+
+`dist/index.js` is the bundled function. The release pull request rebuilds it,
+so a pull request does not need to.
+
 ## License
 
 [MIT](LICENSE)
