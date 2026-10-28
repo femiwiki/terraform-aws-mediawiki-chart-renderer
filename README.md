@@ -33,15 +33,71 @@ module "chart_renderer" {
 }
 ```
 
-The wiki's role then needs `sts:GetWebIdentityToken` for the audience
-`chart-renderer`, and the wiki gets a fresh token before the last one expires
-and sets:
+### The wiki's side
 
-```php
-$wgChartServiceUrl = "$chartRendererUrl$token";
+The wiki's IAM role may ask STS for such tokens:
+
+```hcl
+data "aws_iam_policy_document" "chart_token" {
+  statement {
+    actions   = ["sts:GetWebIdentityToken"]
+    resources = ["*"]
+
+    condition {
+      test     = "ForAllValues:StringEquals"
+      variable = "sts:IdentityTokenAudience"
+      values   = ["chart-renderer"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "sts:SigningAlgorithm"
+      values   = ["ES384"]
+    }
+  }
+}
 ```
 
-where `$chartRendererUrl` is the module's `url` output.
+A token lives at most an hour, so the wiki host fetches a new one more often
+than that, for example every 15 minutes from cron, and writes it to a file
+that PHP can read. With the AWS CLI:
+
+```sh
+aws sts get-web-identity-token --audience chart-renderer \
+  --signing-algorithm ES384 --duration-seconds 3600 \
+  --query WebIdentityToken --output text > /run/secrets/chart-renderer-token
+```
+
+Or from PHP with the [AWS SDK for PHP](https://github.com/aws/aws-sdk-php),
+which MediaWiki does not ship, so add `aws/aws-sdk-php` to
+`composer.local.json` unless an extension such as
+[AWS](https://www.mediawiki.org/wiki/Extension:AWS) already requires it:
+
+```php
+$sts = new Aws\Sts\StsClient( [
+	'region' => 'us-east-1',
+	'version' => '2011-06-15',
+] );
+$token = $sts->getWebIdentityToken( [
+	'Audience' => [ 'chart-renderer' ],
+	'SigningAlgorithm' => 'ES384',
+	'DurationSeconds' => 3600,
+] )['WebIdentityToken'];
+```
+
+`GetWebIdentityToken` is not served by the global STS endpoint, so use a
+regional one (the AWS CLI does by default). Then `LocalSettings.php` reads the
+file on each request:
+
+```php
+wfLoadExtension( 'Chart' );
+$wgChartServiceUrl = $chartRendererUrl .
+	trim( file_get_contents( '/run/secrets/chart-renderer-token' ) );
+```
+
+where `$chartRendererUrl` is the module's `url` output. Femiwiki's setup is in
+[docker-mediawiki](https://github.com/femiwiki/docker-mediawiki/tree/main/dockers/femiwiki)
+(`chart-renderer-token.php`, `run` and `LocalSettings.php`).
 
 ## Development
 
