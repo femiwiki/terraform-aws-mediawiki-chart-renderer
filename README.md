@@ -54,18 +54,28 @@ data "aws_iam_policy_document" "chart_token" {
       variable = "sts:SigningAlgorithm"
       values   = ["ES384"]
     }
+
+    condition {
+      test     = "NumericLessThanEquals"
+      variable = "sts:DurationSeconds"
+      values   = ["3600"]
+    }
   }
 }
 ```
 
 A token lives at most an hour, so the wiki host fetches a new one more often
-than that, for example every 15 minutes from cron, and writes it to a file
-that PHP can read. With the AWS CLI:
+than that, for example every 15 minutes from cron. It writes the token to a
+file that only PHP can read, and replaces the file whole so that PHP never reads
+half a token. With AWS CLI v2:
 
 ```sh
+umask 077
 aws sts get-web-identity-token --audience chart-renderer \
   --signing-algorithm ES384 --duration-seconds 3600 \
-  --query WebIdentityToken --output text > /run/secrets/chart-renderer-token
+  --query WebIdentityToken --output text > /run/secrets/.chart-renderer-token &&
+  chown www-data /run/secrets/.chart-renderer-token &&
+  mv /run/secrets/.chart-renderer-token /run/secrets/chart-renderer-token
 ```
 
 Or from PHP with the [AWS SDK for PHP](https://github.com/aws/aws-sdk-php),
@@ -75,8 +85,9 @@ which MediaWiki does not ship, so add `aws/aws-sdk-php` to
 
 ```php
 $sts = new Aws\Sts\StsClient( [
-	'region' => 'us-east-1',
+	'region' => 'ap-northeast-2',
 	'version' => '2011-06-15',
+	'sts_regional_endpoints' => 'regional',
 ] );
 $token = $sts->getWebIdentityToken( [
 	'Audience' => [ 'chart-renderer' ],
@@ -85,14 +96,19 @@ $token = $sts->getWebIdentityToken( [
 ] )['WebIdentityToken'];
 ```
 
-`GetWebIdentityToken` is not served by the global STS endpoint, so use a
-regional one (the AWS CLI does by default). Then `LocalSettings.php` reads the
-file on each request:
+`GetWebIdentityToken` is not served by the global STS endpoint, so the client
+must use a regional one. AWS CLI v2 does by default; AWS CLI v1 and the SDK for
+PHP may not, hence `sts_regional_endpoints` above.
+
+Then `LocalSettings.php` reads the file on each request:
 
 ```php
 wfLoadExtension( 'Chart' );
-$wgChartServiceUrl = $chartRendererUrl .
-	trim( file_get_contents( '/run/secrets/chart-renderer-token' ) );
+$chartRendererToken = '/run/secrets/chart-renderer-token';
+if ( is_readable( $chartRendererToken ) ) {
+	$wgChartServiceUrl = $chartRendererUrl .
+		trim( file_get_contents( $chartRendererToken ) );
+}
 ```
 
 where `$chartRendererUrl` is the module's `url` output. Femiwiki's setup is in
