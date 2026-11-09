@@ -111,9 +111,75 @@ if ( is_readable( $chartRendererToken ) ) {
 }
 ```
 
-where `$chartRendererUrl` is the module's `url` output. Femiwiki's setup is in
+where `$chartRendererUrl` is the address of a retrying proxy in front of the
+module's `url` output, as described below. Femiwiki's setup is in
 [docker-mediawiki](https://github.com/femiwiki/docker-mediawiki/tree/main/dockers/femiwiki)
-(`chart-renderer-token.php`, `run` and `LocalSettings.php`).
+(`chart-renderer-token.php`, `run` and `LocalSettings.php`) and
+[infra](https://github.com/femiwiki/infra/blob/main/serving/Caddyfile).
+
+### A retrying proxy
+
+`reserved_concurrent_executions` caps how many renders run at once, and Lambda
+answers a request over the cap with 429. Chart sends each chart once and never
+retries, and the page that asked is cached with the chart's error in it. So the
+wiki should not call the function URL directly: it should go through a proxy on
+its own host that retries a 429.
+
+With [Caddy](https://caddyserver.com/) 2.11.3 or later, which can retry on a
+response status:
+
+```caddyfile
+http://127.0.0.1:8090 {
+	bind 127.0.0.1
+
+	reverse_proxy https://{$CHART_RENDERER_HOST} {
+		# Keeps the chart so a retry can send it again
+		request_buffers 4MB
+		header_up Host {upstream_hostport}
+		lb_try_duration 5s
+		lb_try_interval 500ms
+		lb_retry_match {
+			expression `{rp.status_code} == 429`
+		}
+	}
+}
+```
+
+With [nginx](https://nginx.org/), which passes a request on to the next server
+of an upstream and so needs the function's host listed more than once:
+
+```nginx
+upstream chart_renderer {
+	server ${CHART_RENDERER_HOST}:443 max_fails=0;
+	server ${CHART_RENDERER_HOST}:443 max_fails=0;
+	server ${CHART_RENDERER_HOST}:443 max_fails=0;
+}
+
+server {
+	listen 127.0.0.1:8090;
+
+	location / {
+		proxy_pass https://chart_renderer;
+		proxy_set_header Host ${CHART_RENDERER_HOST};
+		proxy_ssl_server_name on;
+		proxy_ssl_name ${CHART_RENDERER_HOST};
+		proxy_http_version 1.1;
+		proxy_next_upstream error timeout http_429 non_idempotent;
+		proxy_next_upstream_tries 10;
+		proxy_next_upstream_timeout 5s;
+	}
+}
+```
+
+nginx tries again at once rather than after a wait, and each address the name
+resolves to counts as a server, so the number of tries is what bounds it.
+nginx also resolves the name only when it starts, unless the servers have the
+`resolve` parameter (nginx 1.27.3 or later, with a `resolver` and a `zone`).
+
+`CHART_RENDERER_HOST` is the host of the module's `url` output, such as
+`abcdefgh.lambda-url.ap-northeast-2.on.aws`. Then `$chartRendererUrl` is
+`http://127.0.0.1:8090/`. The proxy must listen only where the wiki can reach
+it, since anything that can reach it can spend the function's concurrency.
 
 ## Development
 
